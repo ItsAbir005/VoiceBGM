@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mood-Based Audio Mixer (Flask)</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Link to your custom CSS file -->
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="flex flex-col items-center justify-center min-h-screen p-4 bg-gray-900 text-gray-100">
+
+    <div class="container bg-gray-800 p-8 rounded-2xl shadow-xl space-y-6">
+        <h1 class="text-3xl font-bold text-center text-blue-400 mb-6">Mood-Based Audio Mixer (Flask Backend)</h1>
+
+        <!-- Transcript/Text Input -->
+        <div class="mb-4">
+            <label for="transcriptInput" class="block text-sm font-medium text-gray-300 mb-1">Audio Transcript or Text for Mood Analysis (Optional):</label>
+            <textarea id="transcriptInput" rows="5" class="w-full p-3 rounded-lg bg-gray-700 border border-gray-600 text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="E.g., The stale smell of old beer lingers. It takes heat to bring out the odor. A cold dip restores health and zest."></textarea>
+            <p class="text-xs text-gray-400 mt-1">If no audio file is uploaded, this text will be used to estimate music duration and for mood analysis.</p>
+        </div>
+
+        <!-- Original Audio Upload -->
+        <div class="mb-4">
+            <label for="originalAudioInput" class="block text-sm font-medium text-gray-300 mb-1">Upload Original WAV Audio (Optional):</label>
+            <input type="file" id="originalAudioInput" accept="audio/wav" class="w-full p-2 rounded-lg bg-gray-700 border border-gray-600 text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <p class="text-xs text-gray-400 mt-1">If no file is uploaded, only the generated background music will be audible.</p>
+        </div>
+
+        <!-- Volume Sliders -->
+        <div class="flex flex-col sm:flex-row gap-4 mb-6">
+            <div class="flex-1">
+                <label for="voiceVolume" class="block text-sm font-medium text-gray-300 mb-1">Voice Volume Boost (dB): <span id="voiceVolumeValue">3</span></label>
+                <input type="range" id="voiceVolume" min="-10" max="10" value="3" step="1">
+            </div>
+            <div class="flex-1">
+                <label for="musicVolume" class="block text-sm font-medium text-gray-300 mb-1">Music Volume Reduction (dB): <span id="musicVolumeValue">-8</span></label>
+                <input type="range" id="musicVolume" min="-20" max="0" value="-8" step="1">
+            </div>
+        </div>
+
+        <!-- Action Button -->
+        <div class="flex justify-center">
+            <button id="processAudioButton" class="bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-6 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 shadow-md">
+                Process Audio
+            </button>
+        </div>
+
+        <!-- Messages and Output -->
+        <div id="messageBox" class="message-box"></div>
+        
+        <div id="audioOutputSection" class="mt-6 p-4 bg-gray-700 rounded-lg hidden">
+            <h3 class="font-semibold text-lg text-green-300 mb-2">Mixed Audio Output:</h3>
+            <audio id="mixedAudioPlayer" controls class="w-full mt-2"></audio>
+            <a id="downloadMixedAudio" class="mt-4 inline-block bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-4 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 shadow-md" download="mixed_audio.wav">
+                Download Mixed Audio
+            </a>
+        </div>
+    </div>
+
+    <!-- Link to your JavaScript file -->
+    <script src="/static/script.js" defer></script>
+</body>
+</html>

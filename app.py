@@ -11,23 +11,25 @@ import google.generativeai as genai
 from faster_whisper import WhisperModel
 from flask import Flask, request, jsonify, send_file
 from werkzeug.utils import secure_filename
-import tempfile # For creating temporary files/directories
+import tempfile
+from flask_cors import CORS # Import CORS
 
 # --- Flask App Initialization ---
 app = Flask(__name__)
+CORS(app) # Enable CORS for all origins, or specify origins for production
+# For production, consider: CORS(app, origins=["https://your-vercel-frontend-domain.vercel.app"])
 
 # --- Configuration ---
-UPLOAD_FOLDER = 'uploads' # Temporary folder for uploaded files
+UPLOAD_FOLDER = 'uploads' 
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024 # Max upload size: 16MB
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024 
 
 WHISPER_MODEL_SIZE = "base"
 GEMINI_MODEL_NAME = "models/gemini-1.5-flash"
-DEFAULT_MOOD_TAGS = ["calm", "neutral"] # Fallback if Gemini API fails or key is missing
+DEFAULT_MOOD_TAGS = ["calm", "neutral"]
 
-# Load Whisper model once when the app starts
 whisper_model = None
 try:
     print(f"Loading Whisper model '{WHISPER_MODEL_SIZE}' for Flask app...")
@@ -35,9 +37,8 @@ try:
     print("Whisper model loaded successfully.")
 except Exception as e:
     print(f"Error loading Whisper model: {e}. Flask app might not function correctly for transcription.")
-    sys.exit(1) # Exit if Whisper model cannot be loaded
+    sys.exit(1)
 
-# Configure Gemini API if key is available
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 if GOOGLE_API_KEY:
     genai.configure(api_key=GOOGLE_API_KEY)
@@ -45,7 +46,7 @@ if GOOGLE_API_KEY:
 else:
     print("WARNING: GOOGLE_API_KEY environment variable not set. Mood tagging will use default tags.")
 
-# --- Procedural Music Generation Functions (Same as your provided Python code) ---
+# --- Procedural Music Generation Functions (Same as before) ---
 
 def generate_enhanced_background_music(duration_seconds, mood_tags, sample_rate=44100):
     """Generate enhanced procedural background music with better mood variation"""
@@ -106,7 +107,7 @@ def generate_enhanced_background_music(duration_seconds, mood_tags, sample_rate=
             'volume': 0.7, 'reverb': False, 'melody_style': 'cheerful',
             'chord_voicing': 'spread', 'rhythm_pattern': 'bouncy'
         },
-        'neutral': { # Added neutral for default
+        'neutral': {
             'tempo': 70, 'key': 'major', 'complexity': 'low',
             'volume': 0.5, 'reverb': False, 'melody_style': 'gentle',
             'chord_voicing': 'close', 'rhythm_pattern': 'steady'
@@ -149,7 +150,6 @@ def generate_enhanced_background_music(duration_seconds, mood_tags, sample_rate=
         chord_voicing = combined_params.get('chord_voicing', chord_voicing)
         rhythm_pattern = combined_params.get('rhythm_pattern', rhythm_pattern)
     else:
-        # Fallback to 'calm' if no valid mood tags are provided or matched
         defaultParams = mood_params['calm']
         tempo = defaultParams['tempo']
         key_type = defaultParams['key']
@@ -335,7 +335,7 @@ def load_wav_file(filename):
             raise ValueError(f"Unsupported sample width: {sampwidth}")
         
         if channels == 2:
-            audio_data = audio_data[::2] # Take only left channel
+            audio_data = audio_data[::2]
             
         return audio_data, sample_rate
 
@@ -344,10 +344,8 @@ def mix_audio_files(voice_file, music_file, output_file, voice_boost_db=3, music
     voice_data, voice_sr = load_wav_file(voice_file)
     music_data, music_sr = load_wav_file(music_file)
     
-    # Simple resampling if sample rates differ
     if voice_sr != music_sr:
         app.logger.warning(f"Different sample rates ({voice_sr} vs {music_sr}). Resampling music.")
-        # Basic resampling: if music_sr > voice_sr, downsample; otherwise, upsample by repeating
         if music_sr > voice_sr:
             step = music_sr // voice_sr
             music_data = music_data[::step]
@@ -355,23 +353,19 @@ def mix_audio_files(voice_file, music_file, output_file, voice_boost_db=3, music
             repeat_factor = voice_sr // music_sr
             music_data = np.repeat(music_data, repeat_factor)
     
-    # Ensure music is at least as long as voice (loop if necessary)
     if len(music_data) < len(voice_data):
         loops_needed = (len(voice_data) // len(music_data)) + 1
         music_data = np.tile(music_data, loops_needed)
-    music_data = music_data[:len(voice_data)] # Trim music to voice length
+    music_data = music_data[:len(voice_data)]
 
-    # Apply volume adjustments (dB to linear)
     voice_multiplier = 10 ** (voice_boost_db / 20)
     music_multiplier = 10 ** (music_reduction_db / 20)
     
     voice_data *= voice_multiplier
     music_data *= music_multiplier
     
-    # Mix the audio
     mixed_data = voice_data + music_data
     
-    # Prevent clipping by normalizing
     max_val = np.max(np.abs(mixed_data))
     if max_val > 1.0:
         mixed_data = mixed_data / max_val
@@ -400,7 +394,6 @@ def process_audio():
     mood_tags_list = []
     
     try:
-        # Handle original audio file upload
         if 'originalAudio' in request.files:
             original_audio_file = request.files['originalAudio']
             if original_audio_file.filename == '':
@@ -411,7 +404,6 @@ def process_audio():
                 original_audio_file.save(uploaded_audio_path)
                 app.logger.info(f"Uploaded audio saved to: {uploaded_audio_path}")
 
-                # Transcribe audio to get duration and text for mood analysis
                 if whisper_model:
                     segments, info = whisper_model.transcribe(uploaded_audio_path)
                     audio_duration = int(info.duration)
@@ -420,16 +412,13 @@ def process_audio():
                 else:
                     app.logger.warning("Whisper model not loaded. Cannot transcribe audio for mood tagging.")
         
-        # Use transcript for duration estimation if no audio uploaded
         if not uploaded_audio_path and transcript_text:
-            # Rough estimate: 150 words per minute (WPM), 5 chars per word + space
             words = len(transcript_text.strip().split())
-            audio_duration = max(30, (words / 150) * 60) # Minimum 30 seconds
+            audio_duration = max(30, (words / 150) * 60)
             app.logger.info(f"Estimated audio duration from transcript: {audio_duration} seconds")
         elif not uploaded_audio_path and not transcript_text:
-             audio_duration = 30 # Default duration if no audio or transcript
+             audio_duration = 30
 
-        # Get mood tags from Gemini if API key is configured and transcript exists
         if GOOGLE_API_KEY and transcript_text:
             try:
                 gemini_model = genai.GenerativeModel(GEMINI_MODEL_NAME)
@@ -449,14 +438,12 @@ Mood Tags:"""
             app.logger.info("Skipping Gemini API call. Using default mood tags.")
             mood_tags_list = DEFAULT_MOOD_TAGS
 
-        # Generate background music
         background_music_filename = f"generated_bg_music_{os.urandom(8).hex()}.wav"
         background_music_path = os.path.join(tempfile.gettempdir(), background_music_filename)
         app.logger.info(f"Generating procedural background music to: {background_music_path}")
         audio_data, sample_rate = generate_enhanced_background_music(audio_duration, mood_tags_list)
         save_audio_as_wav(audio_data, sample_rate, background_music_path)
 
-        # Mix audio files
         output_mixed_audio_filename = f"mixed_audio_{os.urandom(8).hex()}.wav"
         output_mixed_audio_path = os.path.join(tempfile.gettempdir(), output_mixed_audio_filename)
 
@@ -464,21 +451,17 @@ Mood Tags:"""
             app.logger.info(f"Mixing uploaded audio ({uploaded_audio_path}) with background music ({background_music_path})")
             mix_audio_files(uploaded_audio_path, background_music_path, output_mixed_audio_path, voice_boost_db=voice_volume_db, music_reduction_db=music_volume_db)
         else:
-            # If no original audio, just return the background music
             app.logger.info(f"No original audio provided, returning generated background music directly.")
-            # Rename the background music file to the output name directly
             os.rename(background_music_path, output_mixed_audio_path)
 
         app.logger.info(f"Mixed audio saved to: {output_mixed_audio_path}")
         
-        # Send the file back to the client
         return send_file(output_mixed_audio_path, mimetype='audio/wav', as_attachment=True, download_name='mixed_audio.wav')
 
     except Exception as e:
         app.logger.error(f"An error occurred during audio processing: {e}")
         return jsonify({"error": str(e)}), 500
     finally:
-        # Clean up temporary files
         if uploaded_audio_path and os.path.exists(uploaded_audio_path):
             os.remove(uploaded_audio_path)
             app.logger.info(f"Cleaned up uploaded file: {uploaded_audio_path}")
@@ -486,12 +469,8 @@ Mood Tags:"""
             os.remove(background_music_path)
             app.logger.info(f"Cleaned up generated background music: {background_music_path}")
         if 'output_mixed_audio_path' in locals() and os.path.exists(output_mixed_audio_path):
-            # Only remove if it wasn't sent as attachment, or if it was a temp file handled by send_file
-            # Flask's send_file with as_attachment=True often cleans up temp files itself.
             pass
 
 
 if __name__ == '__main__':
-    # For development, you might run with app.run(debug=True)
-    # For production, use a WSGI server like Gunicorn or Waitress.
-    app.run(debug=True) # debug=True enables auto-reloading and better error messages
+    app.run(debug=True)

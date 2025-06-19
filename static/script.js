@@ -1,6 +1,6 @@
 const transcriptInput = document.getElementById('transcriptInput');
 const originalAudioInput = document.getElementById('originalAudioInput');
-const processAudioButton = document.getElementById('processAudioButton'); 
+const processAudioButton = document.getElementById('processAudioButton');
 const audioOutputSection = document.getElementById('audioOutputSection');
 const mixedAudioPlayer = document.getElementById('mixedAudioPlayer');
 const downloadMixedAudio = document.getElementById('downloadMixedAudio');
@@ -10,18 +10,8 @@ const musicVolumeSlider = document.getElementById('musicVolume');
 const voiceVolumeValue = document.getElementById('voiceVolumeValue');
 const musicVolumeValue = document.getElementById('musicVolumeValue');
 
-// AudioContext is no longer needed on the frontend for generation/mixing,
-// but it's good practice to initialize on user interaction for playback.
-let audioContext = null; 
-
-function initAudioContext() {
-    if (!audioContext) {
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    }
-}
-
-voiceVolumeSlider.oninput = () => { voiceVolumeValue.textContent = voiceVolumeSlider.value; };
-musicVolumeSlider.oninput = () => { musicVolumeValue.textContent = musicVolumeSlider.value; };
+// --- IMPORTANT: Set your Render backend URL here ---
+const BACKEND_URL = 'https://voicebgm.onrender.com'; // Replace with your actual Render URL
 
 function showMessage(message, type = 'info') {
     messageBox.textContent = message;
@@ -40,6 +30,9 @@ function hideMessage() {
     messageBox.classList.remove('block', 'bg-red-600', 'bg-green-600', 'bg-blue-600');
     messageBox.classList.add('hidden');
 }
+
+voiceVolumeSlider.oninput = () => { voiceVolumeValue.textContent = voiceVolumeSlider.value; };
+musicVolumeSlider.oninput = () => { musicVolumeValue.textContent = musicVolumeSlider.value; };
 
 processAudioButton.addEventListener('click', async () => {
     hideMessage();
@@ -67,7 +60,8 @@ processAudioButton.addEventListener('click', async () => {
     formData.append('musicVolume', musicVolume);
 
     try {
-        const response = await fetch('/process_audio', {
+        // Construct the full URL to the backend endpoint
+        const response = await fetch(`${BACKEND_URL}/process_audio`, {
             method: 'POST',
             body: formData,
         });

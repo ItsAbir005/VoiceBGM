@@ -12,12 +12,17 @@ from faster_whisper import WhisperModel
 from flask import Flask, request, jsonify, send_file
 from werkzeug.utils import secure_filename
 import tempfile
-from flask_cors import CORS # Import CORS
+from flask_cors import CORS, cross_origin
 
 # --- Flask App Initialization ---
 app = Flask(__name__)
-CORS(app) # Enable CORS for all origins, or specify origins for production
-# For production, consider: CORS(app, origins=["https://your-vercel-frontend-domain.vercel.app"])
+
+# More specific CORS configuration
+CORS(app, 
+     origins=["*"],  # Allow all origins for development
+     methods=["GET", "POST", "OPTIONS"],
+     allow_headers=["Content-Type", "Authorization"],
+     supports_credentials=True)
 
 # --- Configuration ---
 UPLOAD_FOLDER = 'uploads' 
@@ -380,20 +385,30 @@ def index():
     """Serves the main HTML page."""
     return send_file('index.html')
 
+# Add explicit OPTIONS handler for preflight requests
+@app.route('/process_audio', methods=['OPTIONS'])
+@cross_origin()
+def handle_preflight():
+    return '', 200
+
 @app.route('/process_audio', methods=['POST'])
+@cross_origin()
 def process_audio():
-    if 'originalAudio' not in request.files and not request.form.get('transcript'):
-        return jsonify({"error": "No audio file or transcript provided"}), 400
-
-    transcript_text = request.form.get('transcript', '')
-    voice_volume_db = float(request.form.get('voiceVolume', 3))
-    music_volume_db = float(request.form.get('musicVolume', -8))
-
-    uploaded_audio_path = None
-    audio_duration = 0
-    mood_tags_list = []
-    
     try:
+        if 'originalAudio' not in request.files and not request.form.get('transcript'):
+            return jsonify({"error": "No audio file or transcript provided"}), 400
+
+        transcript_text = request.form.get('transcript', '')
+        voice_volume_db = float(request.form.get('voiceVolume', 3))
+        music_volume_db = float(request.form.get('musicVolume', -8))
+
+        uploaded_audio_path = None
+        audio_duration = 0
+        mood_tags_list = []
+        
+        # Log received parameters for debugging
+        app.logger.info(f"Received request - Transcript: {transcript_text[:100]}..., Voice Vol: {voice_volume_db}, Music Vol: {music_volume_db}")
+        
         if 'originalAudio' in request.files:
             original_audio_file = request.files['originalAudio']
             if original_audio_file.filename == '':
@@ -456,7 +471,14 @@ Mood Tags:"""
 
         app.logger.info(f"Mixed audio saved to: {output_mixed_audio_path}")
         
-        return send_file(output_mixed_audio_path, mimetype='audio/wav', as_attachment=True, download_name='mixed_audio.wav')
+        response = send_file(output_mixed_audio_path, mimetype='audio/wav', as_attachment=True, download_name='mixed_audio.wav')
+        
+        # Add CORS headers to file response
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        
+        return response
 
     except Exception as e:
         app.logger.error(f"An error occurred during audio processing: {e}")
@@ -468,9 +490,14 @@ Mood Tags:"""
         if 'background_music_path' in locals() and os.path.exists(background_music_path):
             os.remove(background_music_path)
             app.logger.info(f"Cleaned up generated background music: {background_music_path}")
-        if 'output_mixed_audio_path' in locals() and os.path.exists(output_mixed_audio_path):
-            pass
+
+
+# Add health check endpoint
+@app.route('/health', methods=['GET'])
+@cross_origin()
+def health_check():
+    return jsonify({"status": "healthy", "message": "Flask server is running"}), 200
 
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, host='0.0.0.0', port=5000)

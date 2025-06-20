@@ -24,7 +24,7 @@ if not os.path.exists(UPLOAD_FOLDER):
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024 
 
-WHISPER_MODEL_SIZE = "base" # Consider "tiny" or "small" for better free-tier performance/memory
+WHISPER_MODEL_SIZE = "tiny"# Consider "tiny" or "small" for better free-tier performance/memory
 GEMINI_MODEL_NAME = "models/gemini-1.5-flash"
 DEFAULT_MOOD_TAGS = ["calm", "neutral"]
 

@@ -12,17 +12,10 @@ from faster_whisper import WhisperModel
 from flask import Flask, request, jsonify, send_file
 from werkzeug.utils import secure_filename
 import tempfile
-from flask_cors import CORS, cross_origin
 
-# --- Flask App Initialization ---
 app = Flask(__name__)
 
-# More specific CORS configuration
-CORS(app, 
-     origins=["*"],  # Allow all origins for development
-     methods=["GET", "POST", "OPTIONS"],
-     allow_headers=["Content-Type", "Authorization"],
-     supports_credentials=True)
+# REMOVED: CORS(app, ...) configuration
 
 # --- Configuration ---
 UPLOAD_FOLDER = 'uploads' 
@@ -31,25 +24,25 @@ if not os.path.exists(UPLOAD_FOLDER):
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024 
 
-WHISPER_MODEL_SIZE = "base"
+WHISPER_MODEL_SIZE = "base" # Consider "tiny" or "small" for better free-tier performance/memory
 GEMINI_MODEL_NAME = "models/gemini-1.5-flash"
 DEFAULT_MOOD_TAGS = ["calm", "neutral"]
 
 whisper_model = None
 try:
-    print(f"Loading Whisper model '{WHISPER_MODEL_SIZE}' for Flask app...")
+    app.logger.info(f"Attempting to load Whisper model '{WHISPER_MODEL_SIZE}'...")
     whisper_model = WhisperModel(WHISPER_MODEL_SIZE)
-    print("Whisper model loaded successfully.")
+    app.logger.info("Whisper model loaded successfully globally.")
 except Exception as e:
-    print(f"Error loading Whisper model: {e}. Flask app might not function correctly for transcription.")
-    sys.exit(1)
+    app.logger.error(f"FATAL ERROR: Could not load Whisper model: {e}")
+    sys.exit(1) # Exit if Whisper model cannot be loaded, as it's a core dependency
 
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 if GOOGLE_API_KEY:
     genai.configure(api_key=GOOGLE_API_KEY)
-    print("Gemini API configured.")
+    app.logger.info("Gemini API configured.")
 else:
-    print("WARNING: GOOGLE_API_KEY environment variable not set. Mood tagging will use default tags.")
+    app.logger.warning("WARNING: GOOGLE_API_KEY environment variable not set. Mood tagging will use default tags.")
 
 # --- Procedural Music Generation Functions (Same as before) ---
 
@@ -383,19 +376,21 @@ def mix_audio_files(voice_file, music_file, output_file, voice_boost_db=3, music
 @app.route('/')
 def index():
     """Serves the main HTML page."""
+    app.logger.info("Serving index.html")
     return send_file('index.html')
 
-# Add explicit OPTIONS handler for preflight requests
-@app.route('/process_audio', methods=['OPTIONS'])
-@cross_origin()
-def handle_preflight():
-    return '', 200
+# REMOVED: Explicit OPTIONS handler for preflight requests, as CORS is removed.
+# @app.route('/process_audio', methods=['OPTIONS'])
+# @cross_origin()
+# def handle_preflight():
+#     return '', 200
 
 @app.route('/process_audio', methods=['POST'])
-@cross_origin()
+# @cross_origin() # REMOVED: cross_origin decorator
 def process_audio():
     try:
         if 'originalAudio' not in request.files and not request.form.get('transcript'):
+            app.logger.error("No audio file or transcript provided in request for /process_audio.")
             return jsonify({"error": "No audio file or transcript provided"}), 400
 
         transcript_text = request.form.get('transcript', '')
@@ -407,35 +402,64 @@ def process_audio():
         mood_tags_list = []
         
         # Log received parameters for debugging
-        app.logger.info(f"Received request - Transcript: {transcript_text[:100]}..., Voice Vol: {voice_volume_db}, Music Vol: {music_volume_db}")
+        app.logger.info(f"Received request to /process_audio endpoint. Transcript (first 100 chars): {transcript_text[:100]}, Voice Vol: {voice_volume_db}, Music Vol: {music_volume_db}")
         
         if 'originalAudio' in request.files:
             original_audio_file = request.files['originalAudio']
             if original_audio_file.filename == '':
+                app.logger.error("No selected original audio file despite originalAudio being in files.")
                 return jsonify({"error": "No selected original audio file"}), 400
-            if original_audio_file:
-                filename = secure_filename(original_audio_file.filename)
-                uploaded_audio_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-                original_audio_file.save(uploaded_audio_path)
-                app.logger.info(f"Uploaded audio saved to: {uploaded_audio_path}")
+            
+            # Use tempfile to create a secure temporary file
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.wav', dir=app.config['UPLOAD_FOLDER'])
+            original_audio_file.save(temp_file.name)
+            uploaded_audio_path = temp_file.name
+            temp_file.close() # Close the file handle after saving
+            
+            app.logger.info(f"Uploaded audio saved to temporary path: {uploaded_audio_path}")
 
-                if whisper_model:
+            if whisper_model:
+                try:
+                    app.logger.info("Starting Whisper transcription...")
                     segments, info = whisper_model.transcribe(uploaded_audio_path)
                     audio_duration = int(info.duration)
                     transcript_text = " ".join([seg.text for seg in segments])
-                    app.logger.info(f"Transcription for uploaded audio: {transcript_text}")
-                else:
-                    app.logger.warning("Whisper model not loaded. Cannot transcribe audio for mood tagging.")
+                    app.logger.info(f"Transcription complete. Duration: {audio_duration}s. Transcript (first 100 chars): {transcript_text[:100]}")
+                except Exception as whisper_error:
+                    app.logger.error(f"Error during Whisper transcription: {whisper_error}", exc_info=True)
+                    # Attempt to get duration from audio file directly if transcription fails
+                    try:
+                        with wave.open(uploaded_audio_path, 'r') as wf:
+                            frames = wf.getnframes()
+                            rate = wf.getframerate()
+                            audio_duration = frames / float(rate)
+                        app.logger.info(f"Using audio duration from file: {audio_duration}s (Whisper failed).")
+                    except Exception as dur_error:
+                        app.logger.error(f"Could not get audio duration from file: {dur_error}", exc_info=True)
+                        audio_duration = 30 # Fallback to default duration
+            else:
+                app.logger.warning("Whisper model not loaded. Cannot transcribe audio for mood tagging. Estimating duration.")
+                try:
+                    with wave.open(uploaded_audio_path, 'r') as wf:
+                        frames = wf.getnframes()
+                        rate = wf.getframerate()
+                        audio_duration = frames / float(rate)
+                    app.logger.info(f"Estimated audio duration from file: {audio_duration}s (Whisper not loaded).")
+                except Exception as dur_error:
+                    app.logger.error(f"Could not get audio duration from file: {dur_error}", exc_info=True)
+                    audio_duration = 30 # Fallback to default duration
         
+        # If no audio uploaded but transcript exists, use transcript for duration estimation
         if not uploaded_audio_path and transcript_text:
             words = len(transcript_text.strip().split())
-            audio_duration = max(30, (words / 150) * 60)
+            audio_duration = max(30, (words / 150) * 60) # Minimum 30 seconds
             app.logger.info(f"Estimated audio duration from transcript: {audio_duration} seconds")
         elif not uploaded_audio_path and not transcript_text:
-             audio_duration = 30
+             audio_duration = 30 # Default duration if no audio or transcript
 
         if GOOGLE_API_KEY and transcript_text:
             try:
+                app.logger.info("Calling Gemini API for mood analysis...")
                 gemini_model = genai.GenerativeModel(GEMINI_MODEL_NAME)
                 prompt = f"""Analyze the following audio transcript and extract 3-5 relevant mood tags, emotional tones, or thematic keywords.
 Provide the tags as a comma-separated list, e.g., "Relaxed, Reflective, Calm".
@@ -445,58 +469,62 @@ Mood Tags:"""
                 response = gemini_model.generate_content(prompt)
                 mood_tags_raw = response.text.strip()
                 mood_tags_list = [tag.strip() for tag in mood_tags_raw.split(',') if tag.strip()]
-                app.logger.info(f"Detected mood tags: {mood_tags_list}")
+                app.logger.info(f"Detected mood tags from Gemini: {mood_tags_list}")
             except Exception as e:
-                app.logger.error(f"Error during Gemini API call: {e}. Using default mood tags.")
+                app.logger.error(f"Error during Gemini API call: {e}. Using default mood tags.", exc_info=True)
                 mood_tags_list = DEFAULT_MOOD_TAGS
         else:
-            app.logger.info("Skipping Gemini API call. Using default mood tags.")
+            app.logger.info("Skipping Gemini API call (no API key or transcript). Using default mood tags.")
             mood_tags_list = DEFAULT_MOOD_TAGS
 
         background_music_filename = f"generated_bg_music_{os.urandom(8).hex()}.wav"
+        # Use tempfile.gettempdir() for temporary files that don't need to persist
         background_music_path = os.path.join(tempfile.gettempdir(), background_music_filename)
         app.logger.info(f"Generating procedural background music to: {background_music_path}")
         audio_data, sample_rate = generate_enhanced_background_music(audio_duration, mood_tags_list)
         save_audio_as_wav(audio_data, sample_rate, background_music_path)
+        app.logger.info("Background music generated.")
 
         output_mixed_audio_filename = f"mixed_audio_{os.urandom(8).hex()}.wav"
         output_mixed_audio_path = os.path.join(tempfile.gettempdir(), output_mixed_audio_filename)
-
+        
         if uploaded_audio_path:
             app.logger.info(f"Mixing uploaded audio ({uploaded_audio_path}) with background music ({background_music_path})")
             mix_audio_files(uploaded_audio_path, background_music_path, output_mixed_audio_path, voice_boost_db=voice_volume_db, music_reduction_db=music_volume_db)
+            app.logger.info(f"Mixed audio saved to: {output_mixed_audio_path}")
         else:
-            app.logger.info(f"No original audio provided, returning generated background music directly.")
+            app.logger.info(f"No original audio provided, renaming generated background music directly to output: {output_mixed_audio_path}.")
             os.rename(background_music_path, output_mixed_audio_path)
 
-        app.logger.info(f"Mixed audio saved to: {output_mixed_audio_path}")
-        
+        # Send the file back to the client
         response = send_file(output_mixed_audio_path, mimetype='audio/wav', as_attachment=True, download_name='mixed_audio.wav')
         
-        # Add CORS headers to file response
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        # REMOVED: Explicit CORS headers for file response
+        # response.headers['Access-Control-Allow-Origin'] = '*' 
+        # response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+        # response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        app.logger.info("Audio sent successfully.")
         
         return response
 
     except Exception as e:
-        app.logger.error(f"An error occurred during audio processing: {e}")
+        app.logger.error(f"An error occurred during audio processing in /process_audio: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
     finally:
-        if uploaded_audio_path and os.path.exists(uploaded_audio_path):
+        # Ensure temporary files are cleaned up
+        if 'uploaded_audio_path' in locals() and uploaded_audio_path and os.path.exists(uploaded_audio_path):
             os.remove(uploaded_audio_path)
-            app.logger.info(f"Cleaned up uploaded file: {uploaded_audio_path}")
-        if 'background_music_path' in locals() and os.path.exists(background_music_path):
+            app.logger.info(f"Cleaned up uploaded temporary file: {uploaded_audio_path}")
+        if 'background_music_path' in locals() and background_music_path and os.path.exists(background_music_path):
             os.remove(background_music_path)
-            app.logger.info(f"Cleaned up generated background music: {background_music_path}")
+            app.logger.info(f"Cleaned up generated background music temporary file: {background_music_path}")
+        if 'output_mixed_audio_path' in locals() and output_mixed_audio_path and os.path.exists(output_mixed_audio_path):
+            pass # send_file often handles deleting its own temp files if as_attachment=True
 
-
-# Add health check endpoint
 @app.route('/health', methods=['GET'])
-@cross_origin()
 def health_check():
-    return jsonify({"status": "healthy", "message": "Flask server is running"}), 200
+    app.logger.info("Health check endpoint hit.")
+    return jsonify({"status": "healthy", "message": "Flask server is running and ready for API requests"}), 200
 
 
 if __name__ == '__main__':

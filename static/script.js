@@ -11,7 +11,7 @@ const voiceVolumeValue = document.getElementById('voiceVolumeValue');
 const musicVolumeValue = document.getElementById('musicVolumeValue');
 
 // --- IMPORTANT: Set your Render backend URL here ---
-const BACKEND_URL = 'https://voicebgm.onrender.com'; // Replace with your actual Render URL
+const BACKEND_URL = ''; // Changed to empty string for relative URLs
 
 // File validation constants
 const ALLOWED_AUDIO_TYPES = ['audio/wav', 'audio/mp3', 'audio/mpeg', 'audio/m4a', 'audio/ogg'];
@@ -162,10 +162,7 @@ processAudioButton.addEventListener('click', async () => {
                 method: 'POST',
                 body: formData,
                 signal: controller.signal,
-                // Add headers for better CORS handling
-                headers: {
-                    'Accept': 'audio/wav, application/json'
-                }
+                // Removed headers for better CORS handling - not needed for same-origin
             });
 
             clearTimeout(timeoutId);
